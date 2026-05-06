@@ -25,12 +25,22 @@
   let launcherEl = null;
   let active = false;
 
+  // DOMParser-based helpers avoid innerHTML Trusted Types violations on strict-CSP pages (e.g. Gemini)
+  function svgEl(str) {
+    const tmp = new DOMParser().parseFromString(`<!DOCTYPE html><body>${str}`, 'text/html');
+    return document.adoptNode(tmp.body.firstChild);
+  }
+  function setHTML(el, html) {
+    const tmp = new DOMParser().parseFromString(`<!DOCTYPE html><body>${html}`, 'text/html');
+    el.replaceChildren(...Array.from(document.adoptNode(tmp.body).childNodes));
+  }
+
   function createLauncher() {
     if (document.querySelector(`.${NS}-launcher`)) return;
     launcherEl = document.createElement("button");
     launcherEl.className = `${NS}-root ${NS}-launcher`;
     launcherEl.title = "Selector";
-    launcherEl.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg>';
+    launcherEl.appendChild(svgEl('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg>'));
     launcherEl.addEventListener("click", toggleActive);
     document.body.appendChild(launcherEl);
   }
@@ -294,7 +304,7 @@
     const annotateBtn = document.createElement("button");
     annotateBtn.className = `${NS}-root ${NS}-annotate-btn`;
     annotateBtn.title = "Add instruction";
-    annotateBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    annotateBtn.appendChild(svgEl('<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>'));
     annotateBtn.onclick = (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -586,7 +596,7 @@
   function createChatPanel() {
     chatPanel = document.createElement("div");
     chatPanel.className = `${NS}-root ${NS}-chat`;
-    chatPanel.innerHTML = `
+    setHTML(chatPanel, `
       <div class="${NS}-drag-handle">
         <span class="${NS}-drag-title">
           <span class="${NS}-status-dot"></span>
@@ -614,7 +624,7 @@
         </div>
         <button class="${NS}-copy-btn" disabled>Copy Prompt</button>
       </div>
-    `;
+    `);
     document.body.appendChild(chatPanel);
 
     chatPanel.querySelector(`.${NS}-copy-btn`).onclick = () => copyPrompt();
@@ -662,7 +672,7 @@
   function updateTags() {
     const container = chatPanel.querySelector(`.${NS}-chat-tags`);
     const copyBtn = chatPanel.querySelector(`.${NS}-copy-btn`);
-    container.innerHTML = "";
+    container.replaceChildren();
 
     if (selectedElements.length > 0) {
       container.classList.remove(`${NS}-hidden`);
@@ -674,7 +684,7 @@
         const tag = document.createElement("span");
         tag.className = `${NS}-tag`;
         const hasNote = annotations.has(aiId);
-        tag.innerHTML = `<span class="${NS}-tag-num">${i + 1}</span><span class="${NS}-tag-label">${elementLabel(el)}${hasNote ? ' \u270e' : ''}</span><button class="${NS}-tag-x" data-aiid="${aiId}" title="Remove">\u00d7</button>`;
+        setHTML(tag, `<span class="${NS}-tag-num">${i + 1}</span><span class="${NS}-tag-label">${elementLabel(el)}${hasNote ? ' \u270e' : ''}</span><button class="${NS}-tag-x" data-aiid="${aiId}" title="Remove">\u00d7</button>`);
         container.appendChild(tag);
       }
 
@@ -690,7 +700,7 @@
       const clearAllBtn = document.createElement("button");
       clearAllBtn.className = `${NS}-tags-action`;
       clearAllBtn.title = "Clear all";
-      clearAllBtn.innerHTML = `<svg width="8" height="8" viewBox="0 0 8 8" fill="none"><line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Clear`;
+      setHTML(clearAllBtn, `<svg width="8" height="8" viewBox="0 0 8 8" fill="none"><line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Clear`);
       clearAllBtn.onclick = (e) => { e.stopPropagation(); clearSelection(); updateTags(); };
       container.appendChild(clearAllBtn);
     } else {
@@ -705,7 +715,7 @@
     const btn = chatPanel.querySelector(`.${NS}-copy-btn`);
     if (copyTimer) clearTimeout(copyTimer);
     btn.classList.add(`${NS}-copy-done`);
-    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> ${msg}`;
+    setHTML(btn, `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> ${msg}`);
     copyTimer = setTimeout(() => {
       btn.classList.remove(`${NS}-copy-done`);
       btn.textContent = "Copy Prompt";
