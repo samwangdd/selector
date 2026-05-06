@@ -198,7 +198,7 @@
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 2147483644;
+  z-index: 2147483647;
   width: 300px;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.09);
@@ -441,7 +441,7 @@
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 2147483647; /* max 32-bit int — must stay above chat panel (z-index 2147483644) */
+  z-index: 2147483644; /* below chat panel so panel overlaps launcher when open */
   width: 40px;
   height: 40px;
   border: none;

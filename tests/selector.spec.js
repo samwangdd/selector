@@ -41,9 +41,9 @@ test.describe('Launcher', () => {
     await expect(launcher(page)).toHaveClass(/ai-editor-launcher-active/);
   });
 
-  test('deactivates on second click', async ({ page }) => {
+  test('deactivates via close button', async ({ page }) => {
     await activate(page);
-    await launcher(page).click();
+    await page.locator('[data-action="close"]').click();
     await expect(launcher(page)).not.toHaveClass(/ai-editor-launcher-active/);
   });
 });
