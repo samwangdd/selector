@@ -728,12 +728,12 @@
     selectedElements.forEach((el, i) => {
       const ctx = buildElementContext(el, i + 1);
       lines.push(`${i + 1}. ${elementLabel(el)} <${ctx.tag}>`);
-      if (ctx.selector)  lines.push(`   selector: ${ctx.selector}`);
       if (ctx.source)    lines.push(`   source: ${ctx.source}`);
       if (ctx.react)     lines.push(`   react: ${ctx.react}`);
       if (ctx.text)      lines.push(`   text: "${ctx.text}"`);
       Object.entries(ctx.dataAttrs).forEach(([k, v]) => lines.push(`   ${k}: ${v}`));
       if (ctx.outerHTML)  lines.push(`   html: ${ctx.outerHTML}`);
+      if (ctx.selector)  lines.push(`   selector: ${ctx.selector}`);
 
       const aiId = el.getAttribute(AI_ID);
       const note = annotations.get(aiId);
