@@ -75,6 +75,15 @@ test.describe('Selection', () => {
     await expect(page.locator('.ai-editor-tag')).toHaveCount(2);
     await expect(page.locator('.ai-editor-sel-box')).toHaveCount(2);
   });
+
+  test('the last selected element has the active selection treatment', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('#action-btn').click({ modifiers: ['Shift'] });
+
+    await expect(page.locator('.ai-editor-sel-box.ai-editor-active')).toHaveCount(1);
+    await expect(page.locator('.ai-editor-sel-label.ai-editor-active')).toHaveCount(1);
+  });
 });
 
 // ── Clear / deselect ──────────────────────────────────────
@@ -99,6 +108,57 @@ test.describe('Clear', () => {
 
     await expect(page.locator('.ai-editor-tag')).toHaveCount(1);
     await expect(page.locator('.ai-editor-sel-box')).toHaveCount(1);
+  });
+
+  test('Escape retains a selected element with an instruction', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Keep this instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(1);
+    await expect(page.locator('.ai-editor-tag-label')).toContainText('intro-para');
+  });
+
+  test('tag remove retains a selected element with an instruction', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Keep this instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+
+    await page.locator('.ai-editor-tag-x').click({ force: true });
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(1);
+  });
+
+  test('clearing an instruction makes its selection removable', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Temporary instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-clear').click({ force: true });
+    await page.locator('.ai-editor-tag-x').click({ force: true });
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(0);
+  });
+
+  test('Shift+click retains a selected element with an instruction', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Keep this instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+
+    await page.locator('#intro-para').click({ modifiers: ['Shift'] });
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(1);
   });
 });
 
@@ -145,7 +205,7 @@ test.describe('Keyboard Navigation', () => {
 
     await page.keyboard.press('ArrowUp');
 
-    await expect(page.locator('.ai-editor-tag-label')).toContainText('container');
+    await expect(page.locator('.ai-editor-tag-label').filter({ hasText: '#container' })).toHaveCount(1);
   });
 
   test('ArrowDown navigates to first child element', async ({ page }) => {
@@ -154,7 +214,7 @@ test.describe('Keyboard Navigation', () => {
 
     await page.keyboard.press('ArrowDown');
 
-    await expect(page.locator('.ai-editor-tag-label')).toContainText('item-1');
+    await expect(page.locator('.ai-editor-tag-label').filter({ hasText: '#item-1' })).toHaveCount(1);
   });
 
   test('ArrowRight navigates to next sibling', async ({ page }) => {
@@ -163,7 +223,7 @@ test.describe('Keyboard Navigation', () => {
 
     await page.keyboard.press('ArrowRight');
 
-    await expect(page.locator('.ai-editor-tag-label')).toContainText('item-2');
+    await expect(page.locator('.ai-editor-tag-label').filter({ hasText: '#item-2' })).toHaveCount(1);
   });
 
   test('ArrowLeft navigates to previous sibling', async ({ page }) => {
@@ -172,7 +232,35 @@ test.describe('Keyboard Navigation', () => {
 
     await page.keyboard.press('ArrowLeft');
 
-    await expect(page.locator('.ai-editor-tag-label')).toContainText('item-1');
+    await expect(page.locator('.ai-editor-tag-label').filter({ hasText: '#item-1' })).toHaveCount(1);
+  });
+
+  test('ArrowRight navigates from the last selected element without removing earlier selections', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('#item-1').click({ modifiers: ['Shift'] });
+
+    await page.keyboard.press('ArrowRight');
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(3);
+    await expect(page.locator('.ai-editor-tag-label').nth(0)).toContainText('intro-para');
+    await expect(page.locator('.ai-editor-tag-label').nth(1)).toContainText('item-1');
+    await expect(page.locator('.ai-editor-tag-label').nth(2)).toContainText('item-2');
+  });
+
+  test('navigation to an existing selection keeps prompt order and updates the active element', async ({ page }) => {
+    await activate(page);
+    await page.locator('#item-1').click();
+    await page.locator('#item-2').click({ modifiers: ['Shift'] });
+
+    await page.keyboard.press('ArrowLeft');
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(2);
+    await expect(page.locator('.ai-editor-tag-label').nth(0)).toContainText('item-1');
+    await expect(page.locator('.ai-editor-tag-label').nth(1)).toContainText('item-2');
+    const activeTop = await page.locator('.ai-editor-sel-box.ai-editor-active').evaluate((el) => el.getBoundingClientRect().top);
+    const itemOneTop = await page.locator('#item-1').evaluate((el) => el.getBoundingClientRect().top);
+    expect(activeTop).toBeLessThanOrEqual(itemOneTop);
   });
 });
 
@@ -215,5 +303,50 @@ test.describe('Annotation', () => {
     await page.locator('.ai-editor-copy-btn').click();
     const text = await page.evaluate(() => window.__clipboardText);
     expect(text).toContain('instruction: Change font size to 24px');
+  });
+
+  test('an annotated selection survives a normal click on another element', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Keep this instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+
+    await page.locator('#action-btn').click();
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(2);
+    await expect(page.locator('.ai-editor-tag-label').first()).toContainText('intro-para');
+    await expect(page.locator('.ai-editor-tag-label').nth(1)).toContainText('action-btn');
+  });
+
+  test('the annotation button stays visible when the selected element reaches the viewport edge', async ({ page }) => {
+    await page.setViewportSize({ width: 400, height: 400 });
+    await page.locator('#container').evaluate((el) => {
+      Object.assign(el.style, {
+        position: 'fixed', top: '120px', left: '0', width: '100vw', margin: '0', boxSizing: 'border-box',
+      });
+    });
+    await activate(page);
+    await page.locator('#container').click({ position: { x: 5, y: 5 } });
+
+    const button = page.locator('.ai-editor-annotate-btn');
+    const bounds = await button.boundingBox();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(400);
+  });
+
+  test('the annotation button moves to the left when the right side lacks space', async ({ page }) => {
+    await page.setViewportSize({ width: 400, height: 400 });
+    await page.locator('#container').evaluate((el) => {
+      Object.assign(el.style, {
+        position: 'fixed', top: '120px', left: '360px', width: '32px', margin: '0', boxSizing: 'border-box',
+      });
+    });
+    await activate(page);
+    await page.locator('#container').click({ position: { x: 2, y: 2 } });
+
+    const buttonBounds = await page.locator('.ai-editor-annotate-btn').boundingBox();
+    const elementBounds = await page.locator('#container').boundingBox();
+    expect(buttonBounds.x + buttonBounds.width).toBeLessThan(elementBounds.x);
   });
 });
