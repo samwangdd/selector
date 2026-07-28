@@ -28,12 +28,18 @@
   position: fixed;
   pointer-events: none;
   z-index: 2147483641;
-  border: 2px solid #111;
+  border: 2px solid #16a34a;
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(22, 163, 74, 0.06);
   opacity: 0;
   transform-origin: center;
   animation: ai-editor-sel-in 180ms cubic-bezier(0.2, 0, 0.1, 1) forwards;
+}
+
+.ai-editor-sel-box.ai-editor-active {
+  border-color: #2563eb;
+  border-width: 3px;
+  background: rgba(37, 99, 235, 0.08);
 }
 
 /* ── Corner handles ──────────────────────────────────────── */
@@ -46,7 +52,7 @@
   position: fixed;
   width: 7px;
   height: 7px;
-  background: #111;
+  background: #16a34a;
   border: 1.5px solid #fff;
   border-radius: 1.5px;
   pointer-events: none;
@@ -70,12 +76,16 @@
   font-weight: 600;
   letter-spacing: 0.01em;
   color: #fff;
-  background: #111;
+  background: #16a34a;
   padding: 2px 6px;
   border-radius: 3px;
   white-space: nowrap;
   opacity: 0;
   animation: ai-editor-label-in 180ms ease forwards;
+}
+
+.ai-editor-sel-label.ai-editor-active {
+  background: #2563eb;
 }
 
 /* ── Annotate button (per-element) ───────────────────────── */
@@ -198,7 +208,7 @@
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 2147483644;
+  z-index: 2147483647;
   width: 300px;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.09);
@@ -441,20 +451,22 @@
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 2147483647; /* max 32-bit int — must stay above chat panel (z-index 2147483644) */
+  z-index: 2147483644; /* below chat panel so panel overlaps launcher when open */
   width: 40px;
   height: 40px;
   border: none;
   border-radius: 50%;
   background: #111;
   color: #fff;
-  cursor: pointer;
+  cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   transition: background 150ms, transform 100ms, box-shadow 150ms;
+  touch-action: none;
+  user-select: none;
 }
 
 .ai-editor-launcher:hover {
@@ -465,6 +477,13 @@
 
 .ai-editor-launcher:active {
   transform: scale(0.96);
+}
+
+.ai-editor-launcher.ai-editor-launcher-dragging {
+  cursor: grabbing;
+  transition: none;
+  transform: none;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
 
 .ai-editor-launcher.ai-editor-launcher-active {

@@ -9,6 +9,7 @@
   const AI_ID = "data-ai-id";
 
   let selectedElements = [];
+  let activeElement = null;
   let chatPanel = null;
   let hoverBox = null;
   let aiIdCounter = 0;
@@ -25,14 +26,133 @@
   let launcherEl = null;
   let active = false;
 
+  // DOMParser-based helpers avoid innerHTML Trusted Types violations on strict-CSP pages (e.g. Gemini)
+  function svgEl(str) {
+    const tmp = new DOMParser().parseFromString(`<!DOCTYPE html><body>${str}`, 'text/html');
+    return document.adoptNode(tmp.body.firstChild);
+  }
+  function setHTML(el, html) {
+    const tmp = new DOMParser().parseFromString(`<!DOCTYPE html><body>${html}`, 'text/html');
+    el.replaceChildren(...Array.from(document.adoptNode(tmp.body).childNodes));
+  }
+
+  // ── Storage bridge (MAIN ↔ ISOLATED via window.postMessage) ─────
+  const STORAGE_NS = "__aiEditorStorage";
+  const LAUNCHER_POS_KEY = "launcherPos";
+  const LAUNCHER_SIZE = 40;
+  const LAUNCHER_MARGIN = 8;
+
+  function storageGet(key) {
+    return new Promise((resolve) => {
+      const reqId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const handler = (e) => {
+        if (e.source !== window) return;
+        const d = e.data;
+        if (d && d.__ns === STORAGE_NS && d.op === "getResult" && d.reqId === reqId) {
+          window.removeEventListener("message", handler);
+          resolve(d.value);
+        }
+      };
+      window.addEventListener("message", handler);
+      window.postMessage({ __ns: STORAGE_NS, op: "get", key, reqId }, "*");
+    });
+  }
+  function storageSet(key, value) {
+    window.postMessage({ __ns: STORAGE_NS, op: "set", key, value }, "*");
+  }
+
+  function clampLauncherPos(left, top) {
+    const maxLeft = window.innerWidth - LAUNCHER_SIZE - LAUNCHER_MARGIN;
+    const maxTop = window.innerHeight - LAUNCHER_SIZE - LAUNCHER_MARGIN;
+    return {
+      left: Math.max(LAUNCHER_MARGIN, Math.min(left, maxLeft)),
+      top: Math.max(LAUNCHER_MARGIN, Math.min(top, maxTop)),
+    };
+  }
+  function applyLauncherPos(pos) {
+    if (!launcherEl || !pos) return;
+    const { left, top } = clampLauncherPos(pos.left, pos.top);
+    launcherEl.style.left = `${left}px`;
+    launcherEl.style.top = `${top}px`;
+    launcherEl.style.right = "auto";
+    launcherEl.style.bottom = "auto";
+  }
+
+  function attachLauncherDrag(el) {
+    const DRAG_THRESHOLD = 4;
+    let startX = 0, startY = 0;
+    let origLeft = 0, origTop = 0;
+    let dragging = false;
+    let moved = false;
+
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      const rect = el.getBoundingClientRect();
+      startX = e.clientX;
+      startY = e.clientY;
+      origLeft = rect.left;
+      origTop = rect.top;
+      dragging = true;
+      moved = false;
+      e.preventDefault();
+    });
+
+    const onMove = (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+      moved = true;
+      el.classList.add(`${NS}-launcher-dragging`);
+      applyLauncherPos({ left: origLeft + dx, top: origTop + dy });
+    };
+
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      if (!moved) return;
+      el.classList.remove(`${NS}-launcher-dragging`);
+      const { left, top } = clampLauncherPos(
+        parseFloat(el.style.left),
+        parseFloat(el.style.top)
+      );
+      storageSet(LAUNCHER_POS_KEY, { left, top });
+      // Suppress the synthetic click that follows a drag-mouseup
+      const blockClick = (e) => {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        document.removeEventListener("click", blockClick, true);
+      };
+      document.addEventListener("click", blockClick, true);
+    };
+
+    document.addEventListener("mousemove", onMove, true);
+    document.addEventListener("mouseup", onUp, true);
+  }
+
   function createLauncher() {
     if (document.querySelector(`.${NS}-launcher`)) return;
     launcherEl = document.createElement("button");
     launcherEl.className = `${NS}-root ${NS}-launcher`;
-    launcherEl.title = "Selector";
-    launcherEl.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg>';
+    launcherEl.title = "Selector (drag to reposition)";
+    launcherEl.appendChild(svgEl('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg>'));
     launcherEl.addEventListener("click", toggleActive);
+    attachLauncherDrag(launcherEl);
     document.body.appendChild(launcherEl);
+
+    storageGet(LAUNCHER_POS_KEY).then((pos) => {
+      if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
+        applyLauncherPos(pos);
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      if (!launcherEl || !launcherEl.style.left) return;
+      applyLauncherPos({
+        left: parseFloat(launcherEl.style.left),
+        top: parseFloat(launcherEl.style.top),
+      });
+    });
   }
 
   function toggleActive() {
@@ -83,6 +203,7 @@
     listeners.length = 0;
     destroyAllOverlays();
     selectedElements = [];
+    activeElement = null;
     annotations.clear();
     selectionHistory.length = 0;
     removeAnnotationPopover();
@@ -294,7 +415,7 @@
     const annotateBtn = document.createElement("button");
     annotateBtn.className = `${NS}-root ${NS}-annotate-btn`;
     annotateBtn.title = "Add instruction";
-    annotateBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    annotateBtn.appendChild(svgEl('<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>'));
     annotateBtn.onclick = (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -336,7 +457,18 @@
     ov.label.style.left = (r.left - pad) + "px";
 
     ov.annotateBtn.style.top = (r.top - pad - 22) + "px";
-    ov.annotateBtn.style.left = (r.right + pad + 4) + "px";
+    const annotateSize = 20;
+    const annotateGap = 4;
+    const viewportPad = 4;
+    const right = r.right + pad + annotateGap;
+    const left = r.left - pad - annotateGap - annotateSize;
+    if (right + annotateSize <= window.innerWidth - viewportPad) {
+      ov.annotateBtn.style.left = right + "px";
+    } else if (left >= viewportPad) {
+      ov.annotateBtn.style.left = left + "px";
+    } else {
+      ov.annotateBtn.style.left = (window.innerWidth - annotateSize - viewportPad) + "px";
+    }
 
     if (annotations.has(aiId)) {
       ov.annotateBtn.classList.add(`${NS}-has-note`);
@@ -368,26 +500,42 @@
       selectedElements.push(el);
       createSelOverlay(el);
     }
+    setActiveElement(el);
   }
 
-  function removeSelection(el) {
-    const idx = selectedElements.indexOf(el);
-    if (idx >= 0) {
-      selectedElements.splice(idx, 1);
-      const aiId = el.getAttribute(AI_ID);
-      destroySelOverlay(aiId);
-      annotations.delete(aiId);
+  function setActiveElement(el) {
+    activeElement = el;
+    for (const [aiId, ov] of selOverlays) {
+      const isActive = !!el && aiId === el.getAttribute(AI_ID);
+      ov.box.classList.toggle(`${NS}-active`, isActive);
+      ov.label.classList.toggle(`${NS}-active`, isActive);
     }
   }
 
-  function toggleElement(el) {
-    selectedElements.includes(el) ? removeSelection(el) : addSelection(el);
+  function removeSelection(el, force = false) {
+    const idx = selectedElements.indexOf(el);
+    if (idx >= 0) {
+      const aiId = el.getAttribute(AI_ID);
+      if (annotations.has(aiId) && !force) return false;
+      selectedElements.splice(idx, 1);
+      destroySelOverlay(aiId);
+      annotations.delete(aiId);
+      if (activeElement === el) setActiveElement(selectedElements[selectedElements.length - 1] || null);
+      return true;
+    }
+    return false;
   }
 
-  function clearSelection() {
-    destroyAllOverlays();
-    selectedElements = [];
-    annotations.clear();
+  function toggleElement(el) {
+    if (selectedElements.includes(el)) {
+      if (!removeSelection(el)) setActiveElement(el);
+    } else {
+      addSelection(el);
+    }
+  }
+
+  function clearSelection(force = false) {
+    for (const el of [...selectedElements]) removeSelection(el, force);
     removeAnnotationPopover();
   }
 
@@ -396,6 +544,7 @@
     selectionHistory.push({
       elements: [...selectedElements],
       annotations: new Map(annotations),
+      activeElement,
     });
     if (selectionHistory.length > 30) selectionHistory.shift();
   }
@@ -406,22 +555,29 @@
     destroyAllOverlays();
     removeAnnotationPopover();
     selectedElements = state.elements;
+    activeElement = state.activeElement || selectedElements[selectedElements.length - 1] || null;
     annotations.clear();
     for (const [k, v] of state.annotations) annotations.set(k, v);
     for (const el of selectedElements) createSelOverlay(el);
+    setActiveElement(activeElement);
     updateTags();
   }
 
   // ── Parent / child navigation ─────────────────────────────
+  function moveActiveSelection(target) {
+    pushHistory();
+    removeSelection(activeElement);
+    addSelection(target);
+    updateTags();
+  }
+
   function navigateToParent() {
-    if (selectedElements.length !== 1) return;
-    let parent = selectedElements[0].parentElement;
+    const el = activeElement;
+    if (!el) return;
+    let parent = el.parentElement;
     while (parent && parent !== document.body && parent !== document.documentElement) {
       if (!isEditorElement(parent) && isVisible(parent)) {
-        pushHistory();
-        clearSelection();
-        addSelection(parent);
-        updateTags();
+        moveActiveSelection(parent);
         return;
       }
       parent = parent.parentElement;
@@ -429,21 +585,19 @@
   }
 
   function navigateToChild() {
-    if (selectedElements.length !== 1) return;
-    for (const child of selectedElements[0].children) {
+    const el = activeElement;
+    if (!el) return;
+    for (const child of el.children) {
       if (!isEditorElement(child) && isVisible(child) && isMeaningful(child)) {
-        pushHistory();
-        clearSelection();
-        addSelection(child);
-        updateTags();
+        moveActiveSelection(child);
         return;
       }
     }
   }
 
   function navigateToSibling(dir) {
-    if (selectedElements.length !== 1) return;
-    const el = selectedElements[0];
+    const el = activeElement;
+    if (!el) return;
     const parent = el.parentElement;
     if (!parent) return;
     const siblings = Array.from(parent.children).filter(
@@ -452,10 +606,7 @@
     const idx = siblings.indexOf(el);
     const next = siblings[idx + dir];
     if (next) {
-      pushHistory();
-      clearSelection();
-      addSelection(next);
-      updateTags();
+      moveActiveSelection(next);
     }
   }
 
@@ -479,22 +630,22 @@
       undo();
       return;
     }
-    if (e.key === "ArrowUp" && selectedElements.length === 1) {
+    if (e.key === "ArrowUp" && activeElement) {
       e.preventDefault();
       navigateToParent();
       return;
     }
-    if (e.key === "ArrowDown" && selectedElements.length === 1) {
+    if (e.key === "ArrowDown" && activeElement) {
       e.preventDefault();
       navigateToChild();
       return;
     }
-    if (e.key === "ArrowLeft" && selectedElements.length === 1) {
+    if (e.key === "ArrowLeft" && activeElement) {
       e.preventDefault();
       navigateToSibling(-1);
       return;
     }
-    if (e.key === "ArrowRight" && selectedElements.length === 1) {
+    if (e.key === "ArrowRight" && activeElement) {
       e.preventDefault();
       navigateToSibling(1);
       return;
@@ -586,7 +737,7 @@
   function createChatPanel() {
     chatPanel = document.createElement("div");
     chatPanel.className = `${NS}-root ${NS}-chat`;
-    chatPanel.innerHTML = `
+    setHTML(chatPanel, `
       <div class="${NS}-drag-handle">
         <span class="${NS}-drag-title">
           <span class="${NS}-status-dot"></span>
@@ -614,7 +765,7 @@
         </div>
         <button class="${NS}-copy-btn" disabled>Copy Prompt</button>
       </div>
-    `;
+    `);
     document.body.appendChild(chatPanel);
 
     chatPanel.querySelector(`.${NS}-copy-btn`).onclick = () => copyPrompt();
@@ -662,7 +813,7 @@
   function updateTags() {
     const container = chatPanel.querySelector(`.${NS}-chat-tags`);
     const copyBtn = chatPanel.querySelector(`.${NS}-copy-btn`);
-    container.innerHTML = "";
+    container.replaceChildren();
 
     if (selectedElements.length > 0) {
       container.classList.remove(`${NS}-hidden`);
@@ -674,7 +825,7 @@
         const tag = document.createElement("span");
         tag.className = `${NS}-tag`;
         const hasNote = annotations.has(aiId);
-        tag.innerHTML = `<span class="${NS}-tag-num">${i + 1}</span><span class="${NS}-tag-label">${elementLabel(el)}${hasNote ? ' \u270e' : ''}</span><button class="${NS}-tag-x" data-aiid="${aiId}" title="Remove">\u00d7</button>`;
+        setHTML(tag, `<span class="${NS}-tag-num">${i + 1}</span><span class="${NS}-tag-label">${elementLabel(el)}${hasNote ? ' \u270e' : ''}</span><button class="${NS}-tag-x" data-aiid="${aiId}" title="Remove">\u00d7</button>`);
         container.appendChild(tag);
       }
 
@@ -682,7 +833,7 @@
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           const el = byAiId(btn.dataset.aiid);
-          if (el) removeSelection(el);
+          if (el) removeSelection(el, true);
           updateTags();
         }, true);
       });
@@ -690,8 +841,8 @@
       const clearAllBtn = document.createElement("button");
       clearAllBtn.className = `${NS}-tags-action`;
       clearAllBtn.title = "Clear all";
-      clearAllBtn.innerHTML = `<svg width="8" height="8" viewBox="0 0 8 8" fill="none"><line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Clear`;
-      clearAllBtn.onclick = (e) => { e.stopPropagation(); clearSelection(); updateTags(); };
+      setHTML(clearAllBtn, `<svg width="8" height="8" viewBox="0 0 8 8" fill="none"><line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Clear`);
+      clearAllBtn.onclick = (e) => { e.stopPropagation(); clearSelection(true); updateTags(); };
       container.appendChild(clearAllBtn);
     } else {
       container.classList.add(`${NS}-hidden`);
@@ -705,7 +856,7 @@
     const btn = chatPanel.querySelector(`.${NS}-copy-btn`);
     if (copyTimer) clearTimeout(copyTimer);
     btn.classList.add(`${NS}-copy-done`);
-    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> ${msg}`;
+    setHTML(btn, `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> ${msg}`);
     copyTimer = setTimeout(() => {
       btn.classList.remove(`${NS}-copy-done`);
       btn.textContent = "Copy Prompt";
@@ -728,12 +879,12 @@
     selectedElements.forEach((el, i) => {
       const ctx = buildElementContext(el, i + 1);
       lines.push(`${i + 1}. ${elementLabel(el)} <${ctx.tag}>`);
-      if (ctx.selector)  lines.push(`   selector: ${ctx.selector}`);
       if (ctx.source)    lines.push(`   source: ${ctx.source}`);
       if (ctx.react)     lines.push(`   react: ${ctx.react}`);
       if (ctx.text)      lines.push(`   text: "${ctx.text}"`);
       Object.entries(ctx.dataAttrs).forEach(([k, v]) => lines.push(`   ${k}: ${v}`));
       if (ctx.outerHTML)  lines.push(`   html: ${ctx.outerHTML}`);
+      if (ctx.selector)  lines.push(`   selector: ${ctx.selector}`);
 
       const aiId = el.getAttribute(AI_ID);
       const note = annotations.get(aiId);
@@ -756,7 +907,7 @@
     ta.style.cssText = "position:fixed;opacity:0;top:0;left:0";
     document.body.appendChild(ta);
     ta.focus(); ta.select();
-    try { document.execCommand("copy"); } catch (_) {}
+    try { document.execCommand("copy"); } catch { /* ignore */ }
     ta.remove();
   }
 
@@ -814,7 +965,7 @@
       if (components.length) result.react = components.reverse().join(" \u203a ");
 
       return result;
-    } catch (_) {
+    } catch {
       return {};
     }
   }
@@ -828,7 +979,6 @@
       }
     }
     const reactInfo = getReactDebug(el);
-    const isReact = !!Object.keys(reactInfo).length;
     return {
       index,
       aiId: el.getAttribute(AI_ID),
