@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI Element Picker for Claude & Codex",
-  "version": "1.2.5",
-  "description": "Visually select any DOM element and copy an AI prompt for Claude Code, Codex, Cursor, or Copilot. Vibe coding made easy.",
+  "name": "Selector - Visual Element Picker",
+  "version": "1.2.7",
+  "description": "Select page elements visually and copy a structured prompt with selectors, text, HTML, and React component details.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -15,7 +15,19 @@
       "48": "icons/icon48.png"
     }
   },
+  "permissions": [
+    "storage"
+  ],
   "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "assets/storage-bridge.js"
+      ],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "<all_urls>"

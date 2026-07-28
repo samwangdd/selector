@@ -1,17 +1,17 @@
-# AI Element Picker for Claude & Codex
+# Selector - Visual Element Picker
 
-Visually select any DOM element and copy an AI prompt — for Claude Code, Codex, Cursor, Copilot, or any AI coding assistant.
+Visually select any DOM element and copy a structured prompt for an AI coding assistant.
 
-> Forked from [oil-oil/selector](https://github.com/oil-oil/selector). Added Chrome/Edge/Arc browser extension support.
+> Forked from [oil-oil/selector](https://github.com/oil-oil/selector). Added browser extension support.
 
-A browser extension that lets you point and click any element on any webpage, add instructions, and copy a structured AI prompt. Perfect for vibe coding workflows with Claude Code, Codex, Cursor, or GitHub Copilot.
+A browser extension that lets you point and click any element on any webpage, add instructions, and copy a structured AI prompt.
 
 ## Install
 
 1. Install from the Chrome Web Store
 2. Done — a launcher button appears on every page
 
-Works with Chrome, Edge, and Arc.
+Works in Chromium-based browsers that support Chrome extensions.
 
 ## Usage
 

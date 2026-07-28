@@ -46,6 +46,19 @@ test.describe('Launcher', () => {
     await page.locator('[data-action="close"]').click();
     await expect(launcher(page)).not.toHaveClass(/ai-editor-launcher-active/);
   });
+
+  test('close button clears a selected element with an instruction', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Discard this instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+
+    await page.locator('[data-action="close"]').click();
+
+    await expect(page.locator('.ai-editor-sel-box')).toHaveCount(0);
+    await expect(page.locator('.ai-editor-chat-panel')).toHaveCount(0);
+  });
 });
 
 // ── Selection ─────────────────────────────────────────────
@@ -99,6 +112,20 @@ test.describe('Clear', () => {
     await expect(page.locator('.ai-editor-sel-box')).toHaveCount(0);
   });
 
+  test('Clear button removes all selected elements, including instructions', async ({ page }) => {
+    await activate(page);
+    await page.locator('#intro-para').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Discard this instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+    await page.locator('#action-btn').click({ modifiers: ['Shift'] });
+
+    await page.locator('.ai-editor-tags-action').click({ force: true });
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(0);
+    await expect(page.locator('.ai-editor-sel-box')).toHaveCount(0);
+  });
+
   test('tag X button removes only that element', async ({ page }) => {
     await activate(page);
     await page.locator('#intro-para').click();
@@ -123,7 +150,7 @@ test.describe('Clear', () => {
     await expect(page.locator('.ai-editor-tag-label')).toContainText('intro-para');
   });
 
-  test('tag remove retains a selected element with an instruction', async ({ page }) => {
+  test('tag remove clears a selected element and its instruction', async ({ page }) => {
     await activate(page);
     await page.locator('#intro-para').click();
     await page.locator('.ai-editor-annotate-btn').click({ force: true });
@@ -132,7 +159,8 @@ test.describe('Clear', () => {
 
     await page.locator('.ai-editor-tag-x').click({ force: true });
 
-    await expect(page.locator('.ai-editor-tag')).toHaveCount(1);
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(0);
+    await expect(page.locator('.ai-editor-sel-box')).toHaveCount(0);
   });
 
   test('clearing an instruction makes its selection removable', async ({ page }) => {
@@ -235,32 +263,44 @@ test.describe('Keyboard Navigation', () => {
     await expect(page.locator('.ai-editor-tag-label').filter({ hasText: '#item-1' })).toHaveCount(1);
   });
 
-  test('ArrowRight navigates from the last selected element without removing earlier selections', async ({ page }) => {
+  test('ArrowRight replaces the active selection while retaining earlier Shift selections', async ({ page }) => {
     await activate(page);
     await page.locator('#intro-para').click();
     await page.locator('#item-1').click({ modifiers: ['Shift'] });
 
     await page.keyboard.press('ArrowRight');
 
-    await expect(page.locator('.ai-editor-tag')).toHaveCount(3);
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(2);
     await expect(page.locator('.ai-editor-tag-label').nth(0)).toContainText('intro-para');
-    await expect(page.locator('.ai-editor-tag-label').nth(1)).toContainText('item-1');
-    await expect(page.locator('.ai-editor-tag-label').nth(2)).toContainText('item-2');
+    await expect(page.locator('.ai-editor-tag-label').nth(1)).toContainText('item-2');
   });
 
-  test('navigation to an existing selection keeps prompt order and updates the active element', async ({ page }) => {
+  test('navigation to an earlier selection replaces the active element without duplicates', async ({ page }) => {
     await activate(page);
     await page.locator('#item-1').click();
     await page.locator('#item-2').click({ modifiers: ['Shift'] });
 
     await page.keyboard.press('ArrowLeft');
 
-    await expect(page.locator('.ai-editor-tag')).toHaveCount(2);
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(1);
     await expect(page.locator('.ai-editor-tag-label').nth(0)).toContainText('item-1');
-    await expect(page.locator('.ai-editor-tag-label').nth(1)).toContainText('item-2');
     const activeTop = await page.locator('.ai-editor-sel-box.ai-editor-active').evaluate((el) => el.getBoundingClientRect().top);
     const itemOneTop = await page.locator('#item-1').evaluate((el) => el.getBoundingClientRect().top);
     expect(activeTop).toBeLessThanOrEqual(itemOneTop);
+  });
+
+  test('navigation retains an active selection with an instruction', async ({ page }) => {
+    await activate(page);
+    await page.locator('#item-1').click();
+    await page.locator('.ai-editor-annotate-btn').click({ force: true });
+    await page.locator('.ai-editor-annotate-input').fill('Keep this instruction');
+    await page.locator('.ai-editor-annotate-done').click({ force: true });
+
+    await page.keyboard.press('ArrowRight');
+
+    await expect(page.locator('.ai-editor-tag')).toHaveCount(2);
+    await expect(page.locator('.ai-editor-tag-label').nth(0)).toContainText('item-1');
+    await expect(page.locator('.ai-editor-tag-label').nth(1)).toContainText('item-2');
   });
 });
 

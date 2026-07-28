@@ -512,11 +512,11 @@
     }
   }
 
-  function removeSelection(el) {
+  function removeSelection(el, force = false) {
     const idx = selectedElements.indexOf(el);
     if (idx >= 0) {
       const aiId = el.getAttribute(AI_ID);
-      if (annotations.has(aiId)) return false;
+      if (annotations.has(aiId) && !force) return false;
       selectedElements.splice(idx, 1);
       destroySelOverlay(aiId);
       annotations.delete(aiId);
@@ -534,8 +534,8 @@
     }
   }
 
-  function clearSelection() {
-    for (const el of [...selectedElements]) removeSelection(el);
+  function clearSelection(force = false) {
+    for (const el of [...selectedElements]) removeSelection(el, force);
     removeAnnotationPopover();
   }
 
@@ -564,15 +564,20 @@
   }
 
   // ── Parent / child navigation ─────────────────────────────
+  function moveActiveSelection(target) {
+    pushHistory();
+    removeSelection(activeElement);
+    addSelection(target);
+    updateTags();
+  }
+
   function navigateToParent() {
     const el = activeElement;
     if (!el) return;
     let parent = el.parentElement;
     while (parent && parent !== document.body && parent !== document.documentElement) {
       if (!isEditorElement(parent) && isVisible(parent)) {
-        pushHistory();
-        addSelection(parent);
-        updateTags();
+        moveActiveSelection(parent);
         return;
       }
       parent = parent.parentElement;
@@ -584,9 +589,7 @@
     if (!el) return;
     for (const child of el.children) {
       if (!isEditorElement(child) && isVisible(child) && isMeaningful(child)) {
-        pushHistory();
-        addSelection(child);
-        updateTags();
+        moveActiveSelection(child);
         return;
       }
     }
@@ -603,9 +606,7 @@
     const idx = siblings.indexOf(el);
     const next = siblings[idx + dir];
     if (next) {
-      pushHistory();
-      addSelection(next);
-      updateTags();
+      moveActiveSelection(next);
     }
   }
 
@@ -832,7 +833,7 @@
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           const el = byAiId(btn.dataset.aiid);
-          if (el) removeSelection(el);
+          if (el) removeSelection(el, true);
           updateTags();
         }, true);
       });
@@ -841,7 +842,7 @@
       clearAllBtn.className = `${NS}-tags-action`;
       clearAllBtn.title = "Clear all";
       setHTML(clearAllBtn, `<svg width="8" height="8" viewBox="0 0 8 8" fill="none"><line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Clear`);
-      clearAllBtn.onclick = (e) => { e.stopPropagation(); clearSelection(); updateTags(); };
+      clearAllBtn.onclick = (e) => { e.stopPropagation(); clearSelection(true); updateTags(); };
       container.appendChild(clearAllBtn);
     } else {
       container.classList.add(`${NS}-hidden`);
