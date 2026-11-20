@@ -205,6 +205,11 @@
 
 /* ── Chat panel ──────────────────────────────────────────── */
 .ai-editor-chat {
+  --ai-editor-color-selecting: #4ade80;
+  --ai-editor-color-panel-text: #333;
+  --ai-editor-color-panel-secondary: #666;
+  --ai-editor-panel-action-inset: 8px;
+
   position: fixed;
   bottom: 20px;
   right: 20px;
@@ -256,9 +261,13 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #4ade80;
+  background: var(--ai-editor-color-selecting);
   flex-shrink: 0;
   transition: background 200ms;
+}
+
+.ai-editor-status-dot.ai-editor-paused {
+  background: #888;
 }
 
 .ai-editor-status-label {
@@ -313,7 +322,7 @@
   border: 1px solid #e8e8e8;
   border-radius: 20px;
   font-size: 11px;
-  color: #333;
+  color: var(--ai-editor-color-panel-text);
   max-width: 220px;
   user-select: none;
 }
@@ -380,8 +389,8 @@
 /* ── Copy Prompt button ──────────────────────────────────── */
 .ai-editor-copy-btn {
   display: block;
-  width: calc(100% - 16px);
-  margin: 6px 8px 8px;
+  width: calc(100% - 2 * var(--ai-editor-panel-action-inset));
+  margin: 6px var(--ai-editor-panel-action-inset) 8px;
   padding: 8px 0;
   border: none;
   border-radius: 8px;
@@ -415,6 +424,34 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
+}
+
+.ai-editor-screenshot-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: var(--ai-editor-panel-action-inset);
+  color: var(--ai-editor-color-panel-text);
+  font-size: 11px;
+}
+
+.ai-editor-screenshot-checkbox {
+  flex: none;
+  margin: 0;
+  color-scheme: light;
+  accent-color: var(--ai-editor-color-selecting);
+}
+
+.ai-editor-screenshot-status {
+  margin: 0 0 8px;
+  padding-inline: var(--ai-editor-panel-action-inset);
+  color: var(--ai-editor-color-panel-secondary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.ai-editor-screenshot-status:empty {
+  display: none;
 }
 
 /* ── Shortcuts hint ─────────────────────────────────────── */
@@ -493,4 +530,16 @@
 
 .ai-editor-launcher.ai-editor-launcher-active:hover {
   background: #15803d;
+}
+
+
+html.ai-editor-capturing :is(
+  .ai-editor-root,
+  .ai-editor-sel-box,
+  .ai-editor-sel-corner,
+  .ai-editor-sel-label,
+  .ai-editor-hover-box,
+  .ai-editor-marquee
+) {
+  visibility: hidden !important;
 }
