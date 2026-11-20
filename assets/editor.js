@@ -25,6 +25,8 @@
   const selectionHistory = [];
   let launcherEl = null;
   let active = false;
+  let screenshotJob = null;
+  let captureChooserPending = false;
 
   // DOMParser-based helpers avoid innerHTML Trusted Types violations on strict-CSP pages (e.g. Gemini)
   function svgEl(str) {
@@ -197,6 +199,7 @@
   // ── Destroy ────────────────────────────────────────────────
   function destroy() {
     active = false;
+    cancelScreenshot();
     for (const { target, type, fn, capture } of listeners) {
       target.removeEventListener(type, fn, capture);
     }
@@ -504,6 +507,7 @@
   }
 
   function setActiveElement(el) {
+    if (screenshotJob && screenshotJob.target !== el) cancelScreenshot();
     activeElement = el;
     for (const [aiId, ov] of selOverlays) {
       const isActive = !!el && aiId === el.getAttribute(AI_ID);
@@ -622,7 +626,7 @@
     }
     if (mod && e.key.toLowerCase() === "c" && !e.shiftKey && selectedElements.length > 0) {
       e.preventDefault();
-      copyPrompt();
+      copyTextPrompt();
       return;
     }
     if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
@@ -650,7 +654,7 @@
       navigateToSibling(1);
       return;
     }
-    if (e.key === " " && !mod && !e.altKey) {
+    if (e.key === " " && !mod && !e.altKey && !e.target.matches?.(`.${NS}-copy-btn`)) {
       e.preventDefault();
       togglePaused();
     }
@@ -661,7 +665,7 @@
     showHover(null);
     const dot = chatPanel.querySelector(`.${NS}-status-dot`);
     const label = chatPanel.querySelector(`.${NS}-status-label`);
-    if (dot) dot.style.background = paused ? "#888" : "#4ade80";
+    dot?.classList.toggle(`${NS}-paused`, paused);
     if (label) label.textContent = paused ? "Paused" : "Selecting";
   }
 
@@ -763,12 +767,14 @@
           <span><kbd>\u2318Z</kbd> Undo</span>
           <span><kbd>Esc</kbd> Clear</span>
         </div>
+        <label class="${NS}-screenshot-option"><input type="checkbox" class="${NS}-screenshot-checkbox"> Include screenshot of active selection</label>
         <button class="${NS}-copy-btn" disabled>Copy Prompt</button>
+        <p class="${NS}-screenshot-status" role="status"></p>
       </div>
     `);
     document.body.appendChild(chatPanel);
 
-    chatPanel.querySelector(`.${NS}-copy-btn`).onclick = () => copyPrompt();
+    chatPanel.querySelector(`.${NS}-copy-btn`).onclick = copyPrompt;
     chatPanel.querySelector('[data-action="close"]').onclick = destroy;
 
     makeDraggable(chatPanel, chatPanel.querySelector(`.${NS}-drag-handle`));
@@ -812,12 +818,11 @@
   // ── Tags ───────────────────────────────────────────────────
   function updateTags() {
     const container = chatPanel.querySelector(`.${NS}-chat-tags`);
-    const copyBtn = chatPanel.querySelector(`.${NS}-copy-btn`);
+    updateScreenshotControls();
     container.replaceChildren();
 
     if (selectedElements.length > 0) {
       container.classList.remove(`${NS}-hidden`);
-      copyBtn.disabled = false;
 
       for (let i = 0; i < selectedElements.length; i++) {
         const el = selectedElements[i];
@@ -846,7 +851,6 @@
       container.appendChild(clearAllBtn);
     } else {
       container.classList.add(`${NS}-hidden`);
-      copyBtn.disabled = true;
     }
   }
 
@@ -864,11 +868,230 @@
     }, 2000);
   }
 
-  function copyPrompt() {
+  function copyPrompt(event) {
+    if (screenshotJob) return;
+    const checkbox = chatPanel.querySelector(`.${NS}-screenshot-checkbox`);
+    if (checkbox.checked) {
+      if (event.isTrusted) void copyWithScreenshot(checkbox);
+      return;
+    }
+    copyTextPrompt();
+  }
+
+  function copyTextPrompt() {
+    if (screenshotJob) return;
+    screenshotStatus("");
     const text = buildPromptText();
     if (!text) return;
     writeToClipboard(text);
     showCopyFeedback("Copied");
+  }
+
+  // The browser draws and crops the source tab. Never attach or read an unrestricted stream.
+  const SCREENSHOT_TIMEOUT = 20000;
+  const MAX_SCREENSHOT_PIXELS = 16 * 1024 * 1024;
+
+  function updateScreenshotControls() {
+    if (!chatPanel) return;
+    chatPanel.querySelector(`.${NS}-screenshot-checkbox`).disabled = Boolean(screenshotJob);
+    chatPanel.querySelector(`.${NS}-copy-btn`).disabled = !selectedElements.length || Boolean(screenshotJob);
+  }
+
+  function screenshotStatus(message) {
+    const status = chatPanel?.querySelector(`.${NS}-screenshot-status`);
+    if (status) status.textContent = message;
+  }
+
+  function stopCapture(stream) {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+
+  function cancelScreenshot() {
+    if (screenshotJob && !screenshotJob.handedOff) screenshotJob.controller.abort();
+  }
+
+  function waitForCapture(promise, signal) {
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+      promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+  }
+
+  function getCaptureTargetError(target) {
+    const unavailable = "Select a visible element in this tab, or uncheck screenshot to copy text only.";
+    if (!active || activeElement !== target || !target?.isConnected ||
+        target.matches("html, body, iframe, frame, object, embed") || !isVisible(target)) return unavailable;
+
+    const rect = target.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const x = viewport?.offsetLeft ?? 0;
+    const y = viewport?.offsetTop ?? 0;
+    const left = Math.max(rect.left, x);
+    const top = Math.max(rect.top, y);
+    const right = Math.min(rect.right, x + (viewport?.width ?? window.innerWidth));
+    const bottom = Math.min(rect.bottom, y + (viewport?.height ?? window.innerHeight));
+    if (left >= right || top >= bottom) return unavailable;
+
+    // Region Capture includes painted pixels from overlapping frames, even across origins.
+    for (const frame of document.querySelectorAll("iframe, frame")) {
+      if (frame.contentDocument || !isVisible(frame)) continue;
+      const bounds = frame.getBoundingClientRect();
+      if (bounds.left < right && bounds.right > left && bounds.top < bottom && bounds.bottom > top) {
+        return "This area contains a cross-origin frame. Select another element, or uncheck screenshot to copy text only.";
+      }
+    }
+    return "";
+  }
+
+  function capturePng(bitmap) {
+    if (bitmap.width < 1 || bitmap.height < 1 || bitmap.width * bitmap.height > MAX_SCREENSHOT_PIXELS) {
+      throw new Error("Invalid capture dimensions");
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("PNG encoding unavailable");
+    context.drawImage(bitmap, 0, 0);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("PNG encoding failed"));
+      }, "image/png");
+    });
+  }
+
+  async function copyWithScreenshot(checkbox) {
+    if (captureChooserPending) {
+      screenshotStatus("Close the previous sharing dialog, or uncheck screenshot to copy text only.");
+      return;
+    }
+    const target = activeElement;
+    const targetError = getCaptureTargetError(target);
+    if (targetError) {
+      screenshotStatus(targetError);
+      return;
+    }
+    const media = navigator.mediaDevices;
+    if (!media?.getDisplayMedia || !globalThis.CropTarget?.fromElement || !globalThis.ImageCapture || !navigator.clipboard?.write || !globalThis.ClipboardItem) {
+      screenshotStatus("Screenshot copy is unavailable here. Uncheck screenshot to copy text only.");
+      return;
+    }
+
+    const job = { target, controller: new AbortController(), handedOff: false };
+    const { signal } = job.controller;
+    screenshotJob = job;
+    updateScreenshotControls();
+    screenshotStatus("Choose this tab in the browser's sharing dialog.");
+    const timer = setTimeout(() => {
+      job.controller.abort(new DOMException("Timed out", "TimeoutError"));
+    }, SCREENSHOT_TIMEOUT);
+    let stream;
+    let bitmap;
+    const { promise: image, resolve: resolveImage, reject: rejectImage } = Promise.withResolvers();
+    // The clipboard and chooser are both started before awaiting a promise or losing activation.
+    image.catch(() => {});
+    let clipboardFailed = false;
+    const report = (message) => {
+      if (chatPanel?.contains(checkbox)) screenshotStatus(message);
+    };
+    const captureClass = `${NS}-capturing`;
+
+    try {
+      let write;
+      try {
+        write = navigator.clipboard.write([new ClipboardItem({
+          "text/plain": new Blob([buildPromptText()], { type: "text/plain" }),
+          "image/png": image
+        })]).catch((error) => {
+          clipboardFailed = true;
+          job.controller.abort(error);
+          throw error;
+        });
+        // Handle early permission rejection while the picker may still be pending.
+        write.catch(() => {});
+      } catch (error) {
+        clipboardFailed = true;
+        throw error;
+      }
+      const options = {
+        audio: false,
+        video: { displaySurface: "browser", frameRate: { ideal: 8, max: 15 } },
+        preferCurrentTab: true,
+        selfBrowserSurface: "include",
+        surfaceSwitching: "exclude",
+        monitorTypeSurfaces: "exclude"
+      };
+      const request = media.getDisplayMedia(options);
+      captureChooserPending = true;
+      const chooserFinished = () => {
+        captureChooserPending = false;
+        updateScreenshotControls();
+      };
+      request.then((granted) => {
+        if (signal.aborted) stopCapture(granted);
+        chooserFinished();
+      }, chooserFinished);
+
+      stream = await waitForCapture(request, signal);
+      const [track] = stream.getVideoTracks();
+      if (!track || track.getSettings().displaySurface !== "browser" || !track.cropTo) {
+        throw new Error("Not a supported tab capture");
+      }
+      if (getCaptureTargetError(target)) throw new DOMException("Selection changed", "AbortError");
+
+      document.documentElement.classList.add(captureClass);
+      await waitForCapture(new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }), signal);
+
+      const region = await waitForCapture(globalThis.CropTarget.fromElement(target), signal);
+      // A differently sourced tab refuses this same-tab crop target. Do not fall back to coordinates.
+      await waitForCapture(track.cropTo(region), signal);
+      if (getCaptureTargetError(target)) throw new DOMException("Selection changed", "AbortError");
+
+      const pendingFrame = new globalThis.ImageCapture(track).grabFrame();
+      pendingFrame.then((frame) => {
+        if (signal.aborted) frame.close();
+      }, () => {});
+      bitmap = await waitForCapture(pendingFrame, signal);
+      stopCapture(stream);
+      stream = null;
+
+      const png = await waitForCapture(capturePng(bitmap), signal);
+      if (getCaptureTargetError(target)) throw new DOMException("Selection changed", "AbortError");
+      signal.throwIfAborted();
+      // Once image data is passed to the OS, its write cannot be cancelled.
+      job.handedOff = true;
+      clearTimeout(timer);
+      document.documentElement.classList.remove(captureClass);
+      report("Waiting for the clipboard to finish.");
+      resolveImage(png);
+      await write;
+      checkbox.checked = false;
+      if (chatPanel?.contains(checkbox)) showCopyFeedback("Copied");
+      report("Prompt and screenshot copied.");
+    } catch (error) {
+      rejectImage(error);
+      if (clipboardFailed) {
+        report("Could not write the clipboard. Uncheck screenshot to copy text only.");
+      } else if (error?.name === "TimeoutError") {
+        report("Screenshot timed out. Nothing copied; uncheck screenshot to copy text only.");
+      } else if (error?.name === "AbortError" || error?.name === "NotAllowedError") {
+        report("Screenshot cancelled. Nothing copied; uncheck screenshot to copy text only.");
+      } else {
+        report("Could not crop this element. Choose this tab, or uncheck screenshot to copy text only.");
+      }
+    } finally {
+      clearTimeout(timer);
+      stopCapture(stream);
+      bitmap?.close();
+      document.documentElement.classList.remove(captureClass);
+      screenshotJob = null;
+      updateScreenshotControls();
+    }
   }
 
   // ── Prompt building ────────────────────────────────────────
